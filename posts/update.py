@@ -2,7 +2,7 @@ import requests
 import logging
 from typing import Mapping
 
-from django.db import transaction
+from django_pglocks import advisory_lock
 from lxml import html, etree
 
 from posts.models import Post
@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 PAGE_URL = 'https://news.ycombinator.com/'
 MAX_POSTS_TO_FETCH = 30
+UPDATE_POSTS_LOCK_ID = 'hacker_news_update_posts_lock'
 
 
 # TODO: implement retry decorator in case of network error
@@ -53,9 +54,11 @@ def update_posts():
     content = fetch_content()
     new_posts = extract_posts(content)
 
-    with transaction.atomic():
+    # using lock in case we are not the only update task running right now
+    # another way is not create Post.objects.get_or_create instead of bulk_create
+    with advisory_lock(UPDATE_POSTS_LOCK_ID):
         existing_post_ids = (
-            Post.objects.select_for_update().
+            Post.objects.
             filter(pk__in=new_posts.keys()).
             values_list('pk', flat=True)
         )
