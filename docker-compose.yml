@@ -1,0 +1,67 @@
+version: '3.6'
+
+services:
+  db:
+    container_name: db
+    image: postgres
+    environment:
+      POSTGRES_PASSWORD: pass
+      POSTGRES_USER: user
+      POSTGRES_DB: hacker_news
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+
+  broker:
+    container_name: broker
+    image: rabbitmq
+    ports:
+      - "127.0.0.1:5672:5672"
+    volumes:
+      - rabbitdata:/var/lib/rabbitmq
+
+  migrate:
+    container_name: migrate
+    build: .
+    image: hacker_news_app
+    command: [python, manage.py, migrate]
+    depends_on:
+      - db
+
+  beat:
+    container_name: beat
+    build: .
+    image: hacker_news_app
+    environment:
+      CELERY_BROKER_URL: 'amqp://guest:guest@broker:5672'
+    command: [celery, beat, --app=hacker_news, --loglevel=DEBUG]
+    depends_on:
+      - broker
+
+  worker:
+    container_name: worker
+    build: .
+    image: hacker_news_app
+    environment:
+      CELERY_BROKER_URL: 'amqp://guest:guest@broker:5672'
+    command: [celery, worker, --app=hacker_news, --loglevel=DEBUG, --concurrency=2]
+    depends_on:
+      - broker
+      - db
+      - migrate
+
+  web:
+    container_name: web
+    build: .
+    image: hacker_news_app
+    command: [uwsgi, --ini, /opt/app/uwsgi.ini]
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      - db
+      - migrate
+
+volumes:
+  pgdata:
+  rabbitdata:
