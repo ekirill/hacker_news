@@ -2,6 +2,7 @@ import requests
 import logging
 from typing import Mapping
 
+from django.db import transaction
 from lxml import html, etree
 
 from posts.models import Post
@@ -52,10 +53,15 @@ def update_posts():
     content = fetch_content()
     new_posts = extract_posts(content)
 
-    existing_post_ids = Post.objects.filter(pk__in=new_posts.keys()).values_list('pk', flat=True)
-    new_post_ids = set(new_posts.keys()).difference(existing_post_ids)
-    if new_post_ids:
-        Post.objects.bulk_create(new_posts[post_id] for post_id in new_post_ids)
-        logger.info(f'Created new posts: {sorted(new_post_ids)}')
-    else:
-        logger.info(f'No new posts found')
+    with transaction.atomic():
+        existing_post_ids = (
+            Post.objects.select_for_update().
+            filter(pk__in=new_posts.keys()).
+            values_list('pk', flat=True)
+        )
+        new_post_ids = set(new_posts.keys()).difference(existing_post_ids)
+        if new_post_ids:
+            Post.objects.bulk_create(new_posts[post_id] for post_id in new_post_ids)
+            logger.info(f'Created new posts: {sorted(new_post_ids)}')
+        else:
+            logger.info(f'No new posts found')
